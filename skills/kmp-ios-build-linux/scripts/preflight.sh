@@ -47,13 +47,27 @@ if [ -n "${JAVA_HOME_FOR_BUILD:-}" ]; then
     v=$("$JAVA_HOME_FOR_BUILD/bin/java" -version 2>&1 | head -1) && pass "java: $v" || fail "java does not run: $JAVA_HOME_FOR_BUILD"
 else warn "gate.env: JAVA_HOME_FOR_BUILD not set; the build uses the default java"; fi
 procs=$(for p in /proc/[0-9]*; do tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo; done | grep -v grep)
-busy=$(printf '%s\n' "$procs" | grep -c -E 'gradlew|GradleWrapperMain')
+busy=$(printf '%s\n' "$procs" | grep -c -E '^[^ ]*/java .*(GradleWrapperMain|gradle-wrapper\.jar)')
 idle=$(printf '%s\n' "$procs" | grep -c 'GradleDaemon')
 [ "$busy" -eq 0 ] && pass "no Gradle command running" || fail "$busy Gradle command(s) running: wait, one Gradle command at a time"
 [ "$idle" -eq 0 ] || warn "$idle Gradle daemon(s) alive (idle daemons share memory with the build)"
 if [ -n "${PORT_EVIDENCE:-}" ]; then
     [ -r "$PORT_EVIDENCE" ] && pass "port qualification evidence: $PORT_EVIDENCE" || fail "port qualification evidence missing: $PORT_EVIDENCE"
 else fail "gate.env: PORT_EVIDENCE not set (setup's qualified Kotlin/Native port record)"; fi
+# Gradle settings of the Linux port (references/build.md, Gradle settings for the Linux port).
+# Look in GRADLE_ARGS, the gate's build command, gradle.properties and the build scripts.
+port_settings=$(
+    printf '%s\n' "${GRADLE_ARGS:-}"
+    [ -r "${FRAMEWORK_BUILD_CMD:-}" ] && cat "$FRAMEWORK_BUILD_CMD"
+    find "$PROJECT" -maxdepth 3 \( -name build -o -name .gradle -o -name gradle-home \) -prune -o \
+        \( -name gradle.properties -o -name '*.gradle.kts' -o -name '*.gradle' \) -type f -print0 2>/dev/null | xargs -0 -r cat 2>/dev/null)
+port_setting() { # regex text
+    printf '%s\n' "$port_settings" | grep -v '^ *//' | grep -qE "$1" && pass "Gradle port setting: $2" \
+        || fail "Gradle port setting missing: $2 (references/build.md, Gradle settings for the Linux port)"
+}
+port_setting 'enableDebugTransparentStepping"?[ ,=]+"?false' 'kotlin.native.binary.enableDebugTransparentStepping=false (else the link aborts in DebugInfoC.cpp:96, exit 134)'
+port_setting 'kotlin\.native\.toolchain\.enabled=false' 'kotlin.native.toolchain.enabled=false (else downloadKotlinNativeDistribution fails with a NullPointerException)'
+port_setting 'targetToolchain\.linux_x64-ios_arm64=' '-Xoverride-konan-properties with targetToolchain.linux_x64-ios_arm64 (else the link fails with a NullPointerException)'
 
 # Swift, xtool, SDK
 v=$("${RUN[@]}" swift --version 2>&1 | head -1) && pass "swift: $v" || fail "swift does not run: $v"
@@ -70,7 +84,7 @@ esac
 for t in unzip openssl python3; do
     p=$(command -v "$t") && pass "$t: $p" || fail "$t not found"
 done
-p=${ZIP:-$(command -v zip)}
+p=${ZIP:-${KMP_IOS_ZIP:-$(command -v zip)}}
 [ -n "$p" ] && [ -x "$p" ] && pass "zip: $p" || fail "zip not found (set ZIP to the setup-verified binary)"
 [ -n "${OBJDUMP:-}" ] && [ -x "$OBJDUMP" ] && pass "Mach-O inspector: $OBJDUMP" || fail "OBJDUMP (llvm-objdump path) missing or not executable: record it with setup scripts/record-component.sh --env OBJDUMP"
 
