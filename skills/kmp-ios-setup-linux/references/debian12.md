@@ -49,11 +49,14 @@ Create the resolved workspace directories under the machine root.
 
 `apt-get install` is unavailable when the root filesystem is read-only or you are not root. Extract authenticated packages into a writable, persistent scratch tree instead:
 
-1. Download the suite's `InRelease` and authenticate it with the verifier the release's apt uses: `gpgv --keyring /usr/share/keyrings/debian-archive-keyring.gpg` on Bookworm, and `sqv` on Trixie, where `gpgv` may be absent. Prove the check can fail by verifying a copy with one changed byte.
+1. Download the suite's `InRelease` and authenticate it with the verifier the host's apt uses: `gpgv --keyring /usr/share/keyrings/debian-archive-keyring.gpg` on Bookworm, and `sqv --keyring /usr/share/keyrings/debian-archive-keyring.pgp --cleartext` on Trixie, where `gpgv` may be absent. A Trixie keyring also holds the Bookworm keys, so `sqv` authenticates Bookworm suites too. Prove the check can fail by verifying a copy with one changed byte.
 2. Check the `Packages.xz` SHA256 and size against the authenticated `InRelease`, then each `.deb` SHA256 and size against its `Packages` record. Check `-updates` and `-security` for newer versions.
 3. Resolve every runtime library from the packages' `Depends` and fetch only the ones the image lacks (`ldconfig -p`).
 4. Extract with `dpkg-deb --extract` into the scratch root; run no maintainer scripts.
 5. Add wrapper scripts that set `LD_LIBRARY_PATH` to the extracted library directories and run the extracted binary with `"$@"`. Require no `not found` entries from `ldd` in that environment.
+
+`scripts/fetch-debs.py` does steps 1 to 4 with `sqv`; the commands for C12 to C14, C20 and C21 are in [the manifest](toolchain-manifest.md#signing-packaging-project-generator-and-device-tools).
+On a Debian 13 host the Debian 12 Swift build runs with the C12 to C14 libraries; among the ELF files in `usr/bin`, only `lldb` and `lldb-dap` report `libpython3.11.so.1.0 => not found`, and the build uses neither.
 
 Keep large downloads and caches on disk-backed storage; a memory-backed location when available, such as `$XDG_RUNTIME_DIR` or `/dev/shm`, is for short-lived secrets, not toolchains.
 
@@ -113,6 +116,14 @@ gpg --batch --status-fd=1 --verify /home/iosbuilder/ios-linux/downloads/swift-6.
 ```
 
 Require exit zero, `Good signature`, and `VALIDSIG` identifying the expected primary fingerprint. A trust warning is not a signature failure; a hash alone does not authenticate the publisher.
+
+When `gpg` is absent (a Debian 13 container has `sqv` but no `gpg` or `gpgv`), use `sqv` with a keyring that holds only the downloaded key, instead of the three `gpg` commands above:
+
+```sh
+sqv -v --keyring /home/iosbuilder/ios-linux/downloads/release-key-swift-6.x.asc --signature-file /home/iosbuilder/ios-linux/downloads/swift-6.4.1-debian12.tar.gz.sig /home/iosbuilder/ios-linux/downloads/swift-6.4.1-debian12.tar.gz
+```
+
+Require exit zero, `1 of 1 signatures are valid`, and the printed signing-key fingerprint `52BB7E3DE28A71BE22EC05FFEF80A866B47A981F`, the same value as the active-key record. As a control, require a non-zero exit for a copy of the `.sig` with one changed byte.
 
 ```sh
 tar -tvzf /home/iosbuilder/ios-linux/downloads/swift-6.4.1-debian12.tar.gz

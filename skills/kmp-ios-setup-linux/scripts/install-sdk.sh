@@ -45,12 +45,14 @@ SHA=$(sha256sum "$XIP" | cut -d' ' -f1)
 printf 'xip sha256: %s (identity hash; it does not authenticate Apple)\n' "$SHA"
 record_row "$ROOT" "XcodeXIP" "Xcode27" "$XIP" "$SHA"
 
-env -i HOME="$SDK_HOME" CFFIXED_USER_HOME="$SDK_HOME" LANG=C.UTF-8 \
+# TMPDIR keeps the XIP unpack off /tmp, which can be a small tmpfs.
+mkdir -p "$ROOT/tmp"
+env -i HOME="$SDK_HOME" CFFIXED_USER_HOME="$SDK_HOME" LANG=C.UTF-8 TMPDIR="$ROOT/tmp" \
     XDG_CONFIG_HOME="$SDK_XDG" \
     PATH="${SWIFT_BIN:+$SWIFT_BIN:}$(dirname "$XTOOL_BIN"):/usr/bin:/bin" \
     LD_LIBRARY_PATH="${KMP_IOS_LD_LIBRARY_PATH:-}" \
     "$XTOOL_BIN" sdk install "$XIP" --slim
-STATUS=$(env -i HOME="$SDK_HOME" CFFIXED_USER_HOME="$SDK_HOME" LANG=C.UTF-8 XDG_CONFIG_HOME="$SDK_XDG" \
+STATUS=$(env -i HOME="$SDK_HOME" CFFIXED_USER_HOME="$SDK_HOME" LANG=C.UTF-8 TMPDIR="$ROOT/tmp" XDG_CONFIG_HOME="$SDK_XDG" \
     PATH="${SWIFT_BIN:+$SWIFT_BIN:}$(dirname "$XTOOL_BIN"):/usr/bin:/bin" \
     LD_LIBRARY_PATH="${KMP_IOS_LD_LIBRARY_PATH:-}" "$XTOOL_BIN" sdk status 2>&1)
 printf '%s\n' "$STATUS"

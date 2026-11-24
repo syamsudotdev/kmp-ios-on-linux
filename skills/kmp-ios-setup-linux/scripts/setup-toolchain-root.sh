@@ -82,7 +82,7 @@ for candidate in "${candidates[@]}"; do
 done
 [ -n "$ROOT" ] || { printf 'FAIL no usable toolchain root; pass --root to a writable disk-backed path\n' >&2; exit 1; }
 
-for dir in downloads bin konan-data linux-toolchain/bin port agent swift-distribution \
+for dir in downloads bin konan-data linux-toolchain/bin port agent empty-sysroot swift-distribution \
            xtool-distribution sdk xdg/config xtool-home cache tmp logs; do
     mkdir -p "$ROOT/$dir"
 done
@@ -185,9 +185,11 @@ for candidate in "$ROOT"/swift-distribution/*/usr/bin/swift; do
 done
 if [ -x "$ROOT/xtool-distribution/squashfs-root/AppRun" ]; then fill XTOOL "$ROOT/xtool-distribution/squashfs-root/AppRun"; fi
 if [ -x "$ROOT/xtool2-distribution/squashfs-root/AppRun" ]; then fill XTOOL2 "$ROOT/xtool2-distribution/squashfs-root/AppRun"; fi
-if [ -x "$ROOT/konan-data/dependencies/llvm-21-x86_64-linux-essentials-116/bin/llvm-objdump" ]; then
-    fill OBJDUMP "$ROOT/konan-data/dependencies/llvm-21-x86_64-linux-essentials-116/bin/llvm-objdump"
-fi
+# The JetBrains LLVM essentials set has no llvm-objdump; the Swift usr/bin has one.
+for candidate in "$ROOT/konan-data/dependencies/llvm-21-x86_64-linux-essentials-116/bin/llvm-objdump" \
+                 "$ROOT"/swift-distribution/*/usr/bin/llvm-objdump; do
+    if [ -x "$candidate" ]; then fill OBJDUMP "$candidate"; break; fi
+done
 
 # Shims. Each one sources the record, so it stays valid when a later step fills
 # a value, and names the setup step when its tool is not installed yet.
@@ -196,17 +198,21 @@ write_shim() { # name body-file
     say "SHIM-WROTE $SHIM/$1"
 }
 shim_header() { # name variable usage
-    printf '#!/bin/sh\n# kmp-ios-toolchain shim: %s. Rewritten by scripts/setup-toolchain-root.sh.\nset -eu\nROOT=%s\nif [ -r "$ROOT/env.sh" ]; then . "$ROOT/env.sh"; fi\n[ -n "${%s:-}" ] || { echo "kmp-ios-toolchain: %s is not installed (%s is empty); see %s/manifest.tsv and setup step 3" >&2; exit 127; }\n' "$1" "'$ROOT'" "$1" "$1" "$2" "$ROOT"
+    printf '#!/bin/sh\n# kmp-ios-toolchain shim: %s. Rewritten by scripts/setup-toolchain-root.sh.\nset -eu\nROOT=%s\nif [ -r "$ROOT/env.sh" ]; then . "$ROOT/env.sh"; fi\n[ -n "${%s:-}" ] || { echo "kmp-ios-toolchain: %s is not installed (%s is empty); see %s/manifest.tsv and setup step 3" >&2; exit 127; }\n' "$1" "'$ROOT'" "$2" "$1" "$2" "$ROOT"
 }
+# The shared SDK lives under the record's XDG_CONFIG_HOME, so swift, swiftc and
+# xtool discover it only with that value. HOME is not changed: xtool keeps its
+# login token under $HOME/.config/xtool/data, never under the root.
+sdk_xdg=$'if [ -n "${XTOOL_XDG_CONFIG_HOME:-}" ]; then export XDG_CONFIG_HOME="$XTOOL_XDG_CONFIG_HOME"; fi\n'
 tmpd=$(mktemp -d "$ROOT/tmp/shim.XXXXXX")
 trap 'rm -rf -- "$tmpd"' EXIT
 { shim_header konanc KONAN_HOME; printf 'exec "$KONAN_HOME/bin/konanc" "$@"\n'; } > "$tmpd/konanc"
 write_shim konanc "$tmpd/konanc"
-{ shim_header swift SWIFT_BIN; printf 'if [ -n "${KMP_IOS_LD_LIBRARY_PATH:-}" ]; then export LD_LIBRARY_PATH="$KMP_IOS_LD_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi\nexec "$SWIFT_BIN/swift" "$@"\n'; } > "$tmpd/swift"
+{ shim_header swift SWIFT_BIN; printf '%s' "$sdk_xdg"; printf 'if [ -n "${KMP_IOS_LD_LIBRARY_PATH:-}" ]; then export LD_LIBRARY_PATH="$KMP_IOS_LD_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi\nexec "$SWIFT_BIN/swift" "$@"\n'; } > "$tmpd/swift"
 write_shim swift "$tmpd/swift"
-{ shim_header swiftc SWIFT_BIN; printf 'if [ -n "${KMP_IOS_LD_LIBRARY_PATH:-}" ]; then export LD_LIBRARY_PATH="$KMP_IOS_LD_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi\nexec "$SWIFT_BIN/swiftc" "$@"\n'; } > "$tmpd/swiftc"
+{ shim_header swiftc SWIFT_BIN; printf '%s' "$sdk_xdg"; printf 'if [ -n "${KMP_IOS_LD_LIBRARY_PATH:-}" ]; then export LD_LIBRARY_PATH="$KMP_IOS_LD_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi\nexec "$SWIFT_BIN/swiftc" "$@"\n'; } > "$tmpd/swiftc"
 write_shim swiftc "$tmpd/swiftc"
-{ shim_header xtool XTOOL; cat <<'EOF'
+{ shim_header xtool XTOOL; printf '%s' "$sdk_xdg"; cat <<'EOF'
 # `xtool devices` returns at once when no device is connected. Pass --wait explicitly.
 if [ "${1-}" = devices ]; then
   case " $* " in

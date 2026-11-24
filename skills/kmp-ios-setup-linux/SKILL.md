@@ -105,7 +105,8 @@ Verify Linux LLVM AArch64 support, toolchain overrides, Xcode/sysroot resolution
 Check Darwin archive handling, including baseline ARM64 selection from fat archives and flattened archive members.
 When the supplied port does not fit the project's compiler or plugin versions, research available implementations and propose a bounded change before implementation.
 Do not replace investigation with an automatic request for a prebuilt framework.
-After approval, qualify only a minimal device ARM64 framework probe with a real exported public Kotlin method.
+After approval, qualify only a minimal device ARM64 framework probe with a real exported public Kotlin method: `bash scripts/port/probe-framework.sh` runs `konanc` alone and checks the result (manifest §6).
+Kotlin/Native `2.4.20` on Linux aborts for an Apple target unless `-Xbinary=enableDebugTransparentStepping=false` is set; the probe sets it, and the build needs the same binary option.
 Verify retained compiled implementation, headers, module map, device platform, and native SDK bridge where applicable.
 Reuse unchanged qualification evidence when its compiler, plugins, port, and native inputs still match.
 Keep the probe separate from the actual application; leave application compilation and packaging to the build skill.
